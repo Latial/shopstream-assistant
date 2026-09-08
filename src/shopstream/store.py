@@ -35,21 +35,21 @@ class Store:
         self._matrix: np.ndarray | None = None      # lazily build vector index
 
     # ---- writing ---------------------------------------------------------
-    def replace_all(self, chucks: list[Chunk], vectors: np.ndarray) -> None:
+    def replace_all(self, chunks: list[Chunk], vectors: np.ndarray) -> None:
         """Full re-ingest: the corpus is the source of truth, the store is a cache."""
         with self.db:
             self.db.execute("DELETE FROM chunks")
             self.db.execute("DELETE FROM chunks_fts")
             self.db.executemany(
-                "INSERT INTO chunks (chunk_id, doc_path, doc_title, heading_path" \
+                "INSERT INTO chunks (chunk_id, doc_path, doc_title, heading_path,"
                 " position, text, embedding) VALUES (?, ?, ?, ?, ?, ?, ?)",
                 [(c.chunk_id, c.doc_path, c.doc_title, c.heading_path, c.position,
                   c.text, vectors[i].tobytes())
-                  for i, c in enumerate(chucks)],
+                  for i, c in enumerate(chunks)],
             )            
             self.db.executemany(
                 "INSERT INTO chunks_fts (text, chunk_id) VALUES (?, ?)",
-                [(c.text, c.chunk_id) for c in chucks]
+                [(c.text, c.chunk_id) for c in chunks]
             )
         self._matrix = None
 
@@ -61,5 +61,35 @@ class Store:
         self._matrix = np.vstack(
             [np.frombuffer(r["embedding"], dtype=np.float32) for r in rows]
         ) if rows else np.empty((0,0), dtype=np.float32)
+
+    def vector_search(self, query_vec: np.ndarray, k: int) -> list[tuple[str, float]]:
+        if self._matrix is None:
+            self._load_matrix()
+        if self._matrix.size == 0:
+            return []
+        scores = self._matrix @ query_vec          # unit vectors → cosine similarity
+        top = np.argsort(-scores)[:k]
+        return [(self._ids[i], float(scores[i])) for i in top]
+
+    def keyword_search(self, query: str, k: int) -> list[tuple[str, float]]:
+        """BM25 via FTS5. Lower bm25() is better, so negate it for a 'higher is
+        better' score. Quote the query so user punctuation can't be FTS syntax."""
+        safe = '"' + query.replace('"', " ") + '"'
+        rows = self.db.execute(
+            "SELECT chunk_id, bm25(chunks_fts) AS score FROM chunks_fts "
+            "WHERE chunks_fts MATCH ? ORDER BY score LIMIT ?", (safe, k)).fetchall()
+        return [(r["chunk_id"], -float(r["score"])) for r in rows]   
+
+    def get(self, chunk_ids: list[str]) -> dict[str, sqlite3.Row]:
+        if not chunk_ids:
+            return {}
+        marks = ",".join("?" * len(chunk_ids))
+        rows =  self.db.execute(
+            f"SELECT * FROM chunks WHERE chunk_id in ({marks})", chunk_ids
+        ).fetchall()
+        return {r["chunk_ids"]: r for r in rows}
+
+    def count(self) -> int:
+        return self.db.execute("SELECT COUNT(*) AS n FROM chunks").fetchone()["n"]       
 
     
