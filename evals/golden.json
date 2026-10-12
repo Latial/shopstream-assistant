@@ -1,0 +1,42 @@
+[
+    {
+        "id": "ret-01", "question": 
+        "How long do I have to return an unopened item?", 
+        "expected_answer": "30 days from delivery.", 
+        "must_contain": ["30 days"], 
+        "expected_sources": ["policies/returns.md"], 
+        "category": "policy"
+    },
+    {
+        "id": "ret-02", 
+        "question": "Can I return opened earbuds?", 
+        "expected_answer": "No — hygiene items such as earbuds are excluded once opened.", 
+        "must_contain": ["hygiene", "cannot"], 
+        "expected_sources": ["policies/returns.md"], 
+        "category": "policy-exclusion"
+    },
+    {
+        "id": "prod-03", 
+        "question": "What is the battery life of the Aurora Headphones Pro?", 
+        "expected_answer": "45 hours.", 
+        "must_contain": ["45"], 
+        "must_not_contain": ["30 hours"], 
+        "expected_sources": ["products/SKU-4418-aurora-headphones-pro.md"], 
+        "category": "product-precision"
+    },
+    {
+        "id": "ord-04", 
+        "question": "Can I still return order 1042?", 
+        "expected_answer": "Order 1042 was delivered on 2026-03-12, so the 30-day window closes 2026-04-11.", 
+        "must_contain": ["1042", "30"], 
+        "expected_tools": ["get_order", "search_knowledge_base"], 
+        "category": "combined"
+    },
+    {
+        "id": "gap-05", 
+        "question": "Do you ship to Serbia?", 
+        "expected_answer": "The documentation does not state whether Serbia is served.", 
+        "expect_refusal": true, 
+        "category": "coverage-gap"
+    }
+]
