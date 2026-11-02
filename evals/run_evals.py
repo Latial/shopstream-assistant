@@ -2,22 +2,33 @@
 
 from __future__ import annotations
 
+import argparse
 import json
+import sqlite3
 import statistics
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
-from shopstream.config import EVALS_DIR, load_settings
+import anthropic
+
+from shopstream.assistant import Assistant
+from shopstream.config import DATA_DIR, EVALS_DIR, load_settings
+from shopstream.embeddings import Embedder
+from shopstream.retrieval import Retriever
+from shopstream.store import Store
+from shopstream.tools import ToolBox
+from shopstream.tracing import cost_usd
 
 
 THRESHOLDS = {
-    "retrieval_recall": 0.90,
+    "retrival_recall": 0.90,
     "citation_rate": 0.85,
     "keyword_accuracy": 0.90,
     "judge_score": 4.0,
 }
 
-def retrieval_recall(case: dict, answer) -> float | None:
+def retrival_recall(case: dict, answer) -> float | None:
     """Did retrieval surface at least one chunk from each expected source doc?
     Measured on retrieval alone — independent of how well the model wrote."""
     expected = case.get("expected_sources")
@@ -45,3 +56,32 @@ def keyword_accuracy(case: dict, answer) -> float | None:
     for s in case.get("must_not_contain", []):
         checks.append(s.lower() not in text)
     return (sum(checks) / len(checks)) if checks else None
+
+DETERMINISTIC = {
+    "retrival_recall": retrival_recall,
+    "citation_rate": citation_rate,
+    "keyword_accuracy" : keyword_accuracy,
+}
+# Fail at startup, not silently, if a metric and its threshold drift apart.
+assert set(DETERMINISTIC) | {"judge_score"} == set(THRESHOLDS), \
+    "metric names and THRESHOLDS keys differ"
+
+def load_cases(path: Path) -> list[dict]:
+    """One JSON object per line; blank lines and // comments are skipped."""
+    cases = []
+    for n, line in enumerate(path.read_text(encoding='utf-8').splitlines(), start=1):
+        line = line.strip()
+        if not line or line.startswith("//"):
+           continue
+        try:
+           cases.append(json.loads(line))
+        except json.JSONDecodeError as e:
+           raise SystemExit(f"{path.name} line {n}: invalid JSON ({e})")
+    return cases 
+
+def build_assistant(settings) -> Assistant:
+    """The same wiring as `shopstream ask`, so the eval tests what users get.""" 
+    db = sqlite3.connect(settings.db_path)
+    db.row_factory = sqlite3.Row
+    retriever = Retriever(settings, Store(settings.db_path), Embedder(settings))
+    return Assistant(settings, ToolBox(retriever, db))   
