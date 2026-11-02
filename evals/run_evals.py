@@ -110,3 +110,13 @@ def judge(client, settings, case: dict, answer) -> dict:
                 "reason": parsed.get("reason", ""), "usage":usage}
     except (ValueError, KeyError, TypeError):
         return {"score": 1.0, "reason": f"judge output unparseable: {raw[:120]!r}", "usage": usage}
+
+def mean_of(results: list[dict], metric: str) -> float | None:
+    """Average a metric over the cases where it applies (None = not applicable).""" 
+    vals = [r["scores"][metric] for r in results if r["scores"][metric] is not None]
+    return statistics.mean(vals) if vals else None
+
+def is_failure(scores: dict) -> bool:
+    if scores["judge_score"] < THRESHOLDS["judge_score"]:
+        return True
+    return any(v is not None and v < 1.0 for k,v in scores.items() if k != "judge_score")   
