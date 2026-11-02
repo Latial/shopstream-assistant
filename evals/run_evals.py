@@ -84,4 +84,29 @@ def build_assistant(settings) -> Assistant:
     db = sqlite3.connect(settings.db_path)
     db.row_factory = sqlite3.Row
     retriever = Retriever(settings, Store(settings.db_path), Embedder(settings))
-    return Assistant(settings, ToolBox(retriever, db))   
+    return Assistant(settings, ToolBox(retriever, db))
+
+def judge(client, settings, case: dict, answer) -> dict:
+    """LLM-as-judge, graded against the reference answer at temperature 0."""
+    template = (EVALS_DIR / "judge.md").read_text(encoding="utf-8")
+    sources = "; ".join(c.title or c.source for c in answer.citations) or "(none)"
+    prompt = template.format(
+        question=case["question"],
+        expected=case.get("expected_answer", ""),
+        actual=answer.text,
+        sources=sources
+    )
+    response = client.messages.create(
+        model=settings.judge_model,
+        max_tokens=200,
+        temperature=0,
+        messages=[{"role": "user", "content":prompt}],
+    )
+    raw= "".join(b.text for b in response.content if b.type == "text")
+    usage = (response.usage.input_tokens, response.usage.output_tokens)
+    try:
+        parsed = json.loads(raw[raw.index("{"): raw.rindex("}") + 1])
+        return {"score": float(parsed["score"]),
+                "reason": parsed.get("reason", ""), "usage":usage}
+    except (ValueError, KeyError, TypeError):
+        return {"score": 1.0, "reason": f"judge output unparseable: {raw[:120]!r}", "usage": usage}
